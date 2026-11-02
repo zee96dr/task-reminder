@@ -92,8 +92,16 @@
       <div id="newGroup" class="hidden">
         <label for="gName">Group name</label>
         <input id="gName" type="text" maxlength="60">
-        <label for="gLink">Group invite link</label>
+        <label for="gLink">Group invite link (optional)</label>
         <input id="gLink" type="text" placeholder="https://chat.whatsapp.com/...">
+        <label for="gId">Group ID</label>
+        <input id="gId" type="text" placeholder="1203630...@g.us">
+        <div class="row">
+          <button class="small" type="button" id="findGroups">Find my groups</button>
+          <button class="small" type="button" id="saveGroup">Save group</button>
+        </div>
+        <select id="foundGroups" class="hidden"></select>
+        <div id="groupMsg"></div>
       </div>
       <div class="row"><button class="small danger hidden" id="delGroup">Remove saved group</button></div>
 
@@ -170,13 +178,12 @@ function karachiToIso(v) {
   if (!m) return null;
   return new Date(Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]) - 5 * 3600000).toISOString();
 }
-const shareUrl = (text) => "https://wa.me/?text=" + encodeURIComponent(text);
 
 // ---------- groups ----------
 function renderGroups() {
   const sel = $("groupSel"), keep = sel.value;
   sel.innerHTML = '<option value="">No group</option>' +
-    groups.map((g) => `<option value="${esc(g.code)}">${esc(g.name)}</option>`).join("") +
+    groups.map((g) => `<option value="${esc(g.chatId)}">${esc(g.name)}</option>`).join("") +
     '<option value="__new">New group link…</option>';
   if ([...sel.options].some((o) => o.value === keep)) sel.value = keep;
   onGroupChange();
@@ -192,6 +199,30 @@ $("delGroup").onclick = async () => {
   if (!code || !confirm("Remove this saved group? Existing tasks keep it.")) return;
   groups = (await api("/api/groups/" + encodeURIComponent(code), { method: "DELETE" })).groups;
   renderGroups();
+};
+
+$("findGroups").onclick = async () => {
+  const out = $("groupMsg"), sel = $("foundGroups"); msg(out, "Looking up groups…", "ok");
+  try {
+    const r = await api("/api/groups/lookup");
+    if (!r.groups.length) return msg(out, "No groups found. Is the instance authorized and the group joined?", "warn");
+    sel.innerHTML = '<option value="">Pick a group…</option>' + r.groups.map((g) => `<option value="${esc(g.id)}" data-name="${esc(g.name)}">${esc(g.name)}</option>`).join("");
+    sel.classList.remove("hidden"); msg(out, "", "");
+  } catch (e) { if (e.message !== "auth") msg(out, esc(e.message), "err"); }
+};
+$("foundGroups").onchange = (e) => {
+  const o = e.target.selectedOptions[0]; if (!o || !o.value) return;
+  $("gId").value = o.value; if (!$("gName").value.trim()) $("gName").value = o.dataset.name || "";
+};
+$("saveGroup").onclick = async () => {
+  const out = $("groupMsg");
+  try {
+    const r = await api("/api/groups", { method: "POST",
+      body: JSON.stringify({ name: $("gName").value, link: $("gLink").value, chatId: $("gId").value }) });
+    groups = r.groups; const id = $("gId").value.trim();
+    $("gName").value = ""; $("gLink").value = ""; $("gId").value = ""; $("foundGroups").classList.add("hidden");
+    renderGroups(); $("groupSel").value = id; onGroupChange(); msg(out, "Group saved.", "ok");
+  } catch (e) { if (e.message !== "auth") msg(out, esc(e.message), "err"); }
 };
 
 // ---------- add task ----------
@@ -213,11 +244,11 @@ $("addBtn").onclick = async () => {
   let group = null;
   const gv = $("groupSel").value;
   if (gv === "__new") {
-    if (!$("gLink").value.trim()) return msg(out, "Paste the group invite link.", "err");
-    group = { name: $("gName").value.trim() || "Group", link: $("gLink").value.trim() };
+    if (!$("gId").value.trim()) return msg(out, "Enter the group ID (tap Find my groups).", "err");
+    group = { name: $("gName").value.trim() || "Group", link: $("gLink").value.trim(), chatId: $("gId").value.trim() };
   } else if (gv) {
-    const g = groups.find((x) => x.code === gv);
-    if (g) group = { name: g.name, link: g.link };
+    const g = groups.find((x) => x.chatId === gv);
+    if (g) group = { name: g.name, link: g.link || "", chatId: g.chatId };
   }
 
   $("addBtn").disabled = true;
@@ -230,7 +261,7 @@ $("addBtn").onclick = async () => {
     } else msg(out, html, "ok");
     $("title").value = ""; $("note").value = ""; $("deadline").value = "";
     document.querySelectorAll("#remChecks input[type=checkbox]").forEach((c) => (c.checked = false));
-    $("customMin").value = ""; $("gLink").value = ""; $("gName").value = ""; $("groupSel").value = "";
+    $("customMin").value = ""; $("gLink").value = ""; $("gName").value = ""; $("gId").value = ""; $("groupSel").value = "";
     await loadAll();
   } catch (e) { if (e.message !== "auth") msg(out, esc(e.message), "err"); }
   $("addBtn").disabled = false;
@@ -238,13 +269,16 @@ $("addBtn").onclick = async () => {
 
 // ---------- tests ----------
 async function runTest(target) {
-  const out = $("testMsg"); msg(out, "Sending…", "ok");
+  const out = $("testMsg");
+  let chatId;
+  if (target === "group") {
+    chatId = $("groupSel").value;
+    if (!chatId || chatId === "__new") return msg(out, "Pick a saved group in the task form first (or save one).", "err");
+  }
+  msg(out, "Sending…", "ok");
   try {
-    const r = await api("/api/test", { method: "POST", body: JSON.stringify({ target }) });
-    if (target === "group") {
-      out.innerHTML = `<div class="msg ok">Test sent to your WhatsApp. Tap to forward it to the group:
-        <div class="row"><a class="btn" target="_blank" rel="noopener" href="${shareUrl(r.shareText)}">Share to group</a></div></div>`;
-    } else msg(out, "Test sent. Check WhatsApp (can take a minute).", "ok");
+    await api("/api/test", { method: "POST", body: JSON.stringify({ target, chatId }) });
+    msg(out, target === "group" ? "Test sent to the group." : "Test sent. Check WhatsApp.", "ok");
   } catch (e) { if (e.message !== "auth") msg(out, esc(e.message), "err"); }
 }
 $("testMe").onclick = () => runTest("me");
@@ -257,8 +291,7 @@ function remRow(t, r) {
   else if (r.me === "skipped") me = '<span class="pill skip">skipped (time passed)</span>';
   else me = '<span class="pill">pending</span>';
   if (t.group) {
-    if (r.group === "ready") grp = `<span class="pill sent">group: forward it</span>
-      <a class="btn small" target="_blank" rel="noopener" href="${shareUrl(r.text)}">Share to group</a>`;
+    if (r.group === "sent") grp = '<span class="pill sent">sent to group</span>';
     else if (r.group === "skipped") grp = '<span class="pill skip">group: skipped</span>';
     else grp = '<span class="pill">group: pending</span>';
   }
