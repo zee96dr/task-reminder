@@ -1,0 +1,308 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Deadline Reminders</title>
+<style>
+  :root {
+    --bg: #eef1f5; --card: #ffffff; --ink: #14202b; --muted: #5a6877; --line: #d5dbe3;
+    --accent: #0b6e4f; --accent-ink: #ffffff; --warn: #9a5b00; --warn-bg: #fff3d6; --bad: #a12a2a;
+    --ok-bg: #dff3ea; --wait-bg: #e6e9ee;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #10161d; --card: #19212a; --ink: #e8edf2; --muted: #9aa8b7; --line: #2b3745;
+      --accent: #3fbf90; --accent-ink: #0a1812; --warn: #f0c36a; --warn-bg: #3a2f14; --bad: #ef8a8a;
+      --ok-bg: #173a2c; --wait-bg: #26313d; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 720px; margin: 0 auto; padding: 16px 14px 48px; }
+  h1 { font-size: 1.35rem; margin: 8px 0 14px; }
+  h2 { font-size: 1.05rem; margin: 0 0 10px; }
+  section { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px; margin-bottom: 14px; }
+  label { display: block; font-size: .9rem; color: var(--muted); margin: 10px 0 4px; }
+  input[type=text], input[type=password], input[type=number], input[type=datetime-local], textarea, select {
+    width: 100%; padding: 10px; font: inherit; color: var(--ink); background: var(--bg);
+    border: 1px solid var(--line); border-radius: 8px; }
+  textarea { min-height: 70px; resize: vertical; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .checks { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; }
+  .checks label { display: flex; align-items: center; gap: 6px; margin: 0; color: var(--ink); font-size: 1rem; }
+  .checks input[type=number] { width: 90px; padding: 6px 8px; }
+  button, .btn { font: inherit; padding: 10px 14px; border-radius: 8px; border: 1px solid var(--line);
+    background: var(--card); color: var(--ink); cursor: pointer; text-decoration: none; display: inline-block; }
+  button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
+  button.danger { color: var(--bad); }
+  button:disabled { opacity: .6; cursor: default; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+  .msg { padding: 10px 12px; border-radius: 8px; margin-top: 10px; font-size: .95rem; }
+  .msg.warn { background: var(--warn-bg); color: var(--warn); }
+  .msg.err { background: var(--warn-bg); color: var(--bad); }
+  .msg.ok { background: var(--ok-bg); }
+  .hidden { display: none !important; }
+  .task { border-top: 1px solid var(--line); padding: 12px 0; }
+  .task:first-child { border-top: 0; padding-top: 0; }
+  .task.done .title { text-decoration: line-through; color: var(--muted); }
+  .title { font-weight: 650; }
+  .note { color: var(--muted); white-space: pre-wrap; margin: 2px 0; }
+  .meta { font-size: .9rem; color: var(--muted); }
+  .rem { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; margin-top: 6px; font-size: .92rem; }
+  .pill { padding: 2px 8px; border-radius: 99px; background: var(--wait-bg); font-size: .82rem; }
+  .pill.sent { background: var(--ok-bg); }
+  .pill.skip { background: var(--warn-bg); color: var(--warn); }
+  .btn.small, button.small { padding: 4px 10px; font-size: .88rem; }
+  #empty { color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Deadline Reminders</h1>
+
+  <section id="gate" class="hidden">
+    <h2>Passcode</h2>
+    <label for="pass">Enter your passcode to continue</label>
+    <input id="pass" type="password" autocomplete="current-password">
+    <div class="row"><button class="primary" id="passBtn">Unlock</button></div>
+    <div id="gateErr" class="msg err hidden"></div>
+  </section>
+
+  <div id="app" class="hidden">
+    <section>
+      <h2>New task</h2>
+      <label for="title">Title</label>
+      <input id="title" type="text" maxlength="200">
+      <label for="note">Context / details</label>
+      <textarea id="note" maxlength="1000"></textarea>
+      <label for="deadline">Deadline (Asia/Karachi time)</label>
+      <input id="deadline" type="datetime-local">
+
+      <label>Remind me before the deadline</label>
+      <div class="checks" id="remChecks">
+        <label><input type="checkbox" value="15"> 15 min</label>
+        <label><input type="checkbox" value="20"> 20 min</label>
+        <label><input type="checkbox" value="1440"> 1 day</label>
+        <label><input type="checkbox" value="2880"> 2 days</label>
+        <label><input type="checkbox" id="customOn"> Custom
+          <input type="number" id="customMin" min="1" max="525600" placeholder="minutes"></label>
+      </div>
+
+      <label for="groupSel">WhatsApp group (optional)</label>
+      <select id="groupSel"></select>
+      <div id="newGroup" class="hidden">
+        <label for="gName">Group name</label>
+        <input id="gName" type="text" maxlength="60">
+        <label for="gLink">Group invite link</label>
+        <input id="gLink" type="text" placeholder="https://chat.whatsapp.com/...">
+      </div>
+      <div class="row"><button class="small danger hidden" id="delGroup">Remove saved group</button></div>
+
+      <div class="row"><button class="primary" id="addBtn">Add task</button></div>
+      <div id="formMsg"></div>
+    </section>
+
+    <section>
+      <h2>Setup check</h2>
+      <div class="row" style="margin-top:0">
+        <button id="testMe">Send test WhatsApp</button>
+        <button id="testGroup">Send test to group</button>
+      </div>
+      <div id="testMsg"></div>
+    </section>
+
+    <section>
+      <h2>Tasks</h2>
+      <div id="empty" class="hidden">No tasks yet.</div>
+      <div id="list"></div>
+    </section>
+  </div>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const TZ = "Asia/Karachi";
+let pass = localStorage.getItem("passcode") || "";
+let groups = [];
+let timer = null;
+
+async function api(path, opts = {}) {
+  const res = await fetch(path, {
+    ...opts,
+    headers: { "content-type": "application/json", "x-passcode": pass, ...(opts.headers || {}) },
+  });
+  const data = await res.json().catch(() => ({}));
+  if (res.status === 401) { showGate(pass ? "Wrong passcode." : ""); throw new Error("auth"); }
+  if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
+  return data;
+}
+
+function showGate(msg) {
+  clearInterval(timer);
+  $("app").classList.add("hidden");
+  $("gate").classList.remove("hidden");
+  const e = $("gateErr");
+  e.textContent = msg || ""; e.classList.toggle("hidden", !msg);
+}
+function showApp() {
+  $("gate").classList.add("hidden");
+  $("app").classList.remove("hidden");
+  loadAll();
+  clearInterval(timer);
+  timer = setInterval(loadTasks, 30000);
+}
+$("passBtn").onclick = () => { pass = $("pass").value; localStorage.setItem("passcode", pass); showApp(); };
+$("pass").addEventListener("keydown", (e) => { if (e.key === "Enter") $("passBtn").click(); });
+
+// ---------- helpers ----------
+function humanize(min) {
+  const d = Math.floor(min / 1440), h = Math.floor((min % 1440) / 60), m = min % 60, p = [];
+  if (d) p.push(`${d} day${d > 1 ? "s" : ""}`);
+  if (h) p.push(`${h} hour${h > 1 ? "s" : ""}`);
+  if (m) p.push(`${m} minute${m > 1 ? "s" : ""}`);
+  return p.join(" ");
+}
+const fmt = (iso) => new Intl.DateTimeFormat("en-US", { timeZone: TZ, weekday: "short", year: "numeric", month: "short",
+  day: "numeric", hour: "numeric", minute: "2-digit", hour12: true }).format(new Date(iso)) + " (Asia/Karachi)";
+// "2026-11-05T17:30" typed as Karachi time (UTC+5) -> UTC ISO string
+function karachiToIso(v) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(v || "");
+  if (!m) return null;
+  return new Date(Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]) - 5 * 3600000).toISOString();
+}
+const shareUrl = (text) => "https://wa.me/?text=" + encodeURIComponent(text);
+
+// ---------- groups ----------
+function renderGroups() {
+  const sel = $("groupSel"), keep = sel.value;
+  sel.innerHTML = '<option value="">No group</option>' +
+    groups.map((g) => `<option value="${esc(g.code)}">${esc(g.name)}</option>`).join("") +
+    '<option value="__new">New group link…</option>';
+  if ([...sel.options].some((o) => o.value === keep)) sel.value = keep;
+  onGroupChange();
+}
+function onGroupChange() {
+  const v = $("groupSel").value;
+  $("newGroup").classList.toggle("hidden", v !== "__new");
+  $("delGroup").classList.toggle("hidden", !v || v === "__new");
+}
+$("groupSel").onchange = onGroupChange;
+$("delGroup").onclick = async () => {
+  const code = $("groupSel").value;
+  if (!code || !confirm("Remove this saved group? Existing tasks keep it.")) return;
+  groups = (await api("/api/groups/" + encodeURIComponent(code), { method: "DELETE" })).groups;
+  renderGroups();
+};
+
+// ---------- add task ----------
+function msg(el, text, cls) { el.innerHTML = text ? `<div class="msg ${cls}">${text}</div>` : ""; }
+
+$("addBtn").onclick = async () => {
+  const out = $("formMsg"); msg(out, "", "");
+  const mins = [...document.querySelectorAll("#remChecks input[type=checkbox][value]:checked")].map((c) => +c.value);
+  if ($("customOn").checked) {
+    const c = parseInt($("customMin").value, 10);
+    if (!c || c < 1) return msg(out, "Enter custom minutes (1 or more).", "err");
+    mins.push(c);
+  }
+  const deadline = karachiToIso($("deadline").value);
+  if (!$("title").value.trim()) return msg(out, "Title is required.", "err");
+  if (!deadline) return msg(out, "Pick a deadline.", "err");
+  if (!mins.length) return msg(out, "Pick at least one reminder.", "err");
+
+  let group = null;
+  const gv = $("groupSel").value;
+  if (gv === "__new") {
+    if (!$("gLink").value.trim()) return msg(out, "Paste the group invite link.", "err");
+    group = { name: $("gName").value.trim() || "Group", link: $("gLink").value.trim() };
+  } else if (gv) {
+    const g = groups.find((x) => x.code === gv);
+    if (g) group = { name: g.name, link: g.link };
+  }
+
+  $("addBtn").disabled = true;
+  try {
+    const r = await api("/api/tasks", { method: "POST",
+      body: JSON.stringify({ title: $("title").value, note: $("note").value, deadline, reminders: mins, group }) });
+    let html = "Task added.";
+    if (r.warnings && r.warnings.length) {
+      msg(out, "Task added with warnings:<br>" + r.warnings.map(esc).join("<br>"), "warn");
+    } else msg(out, html, "ok");
+    $("title").value = ""; $("note").value = ""; $("deadline").value = "";
+    document.querySelectorAll("#remChecks input[type=checkbox]").forEach((c) => (c.checked = false));
+    $("customMin").value = ""; $("gLink").value = ""; $("gName").value = ""; $("groupSel").value = "";
+    await loadAll();
+  } catch (e) { if (e.message !== "auth") msg(out, esc(e.message), "err"); }
+  $("addBtn").disabled = false;
+};
+
+// ---------- tests ----------
+async function runTest(target) {
+  const out = $("testMsg"); msg(out, "Sending…", "ok");
+  try {
+    const r = await api("/api/test", { method: "POST", body: JSON.stringify({ target }) });
+    if (target === "group") {
+      out.innerHTML = `<div class="msg ok">Test sent to your WhatsApp. Tap to forward it to the group:
+        <div class="row"><a class="btn" target="_blank" rel="noopener" href="${shareUrl(r.shareText)}">Share to group</a></div></div>`;
+    } else msg(out, "Test sent. Check WhatsApp (can take a minute).", "ok");
+  } catch (e) { if (e.message !== "auth") msg(out, esc(e.message), "err"); }
+}
+$("testMe").onclick = () => runTest("me");
+$("testGroup").onclick = () => runTest("group");
+
+// ---------- task list ----------
+function remRow(t, r) {
+  let me, grp = "";
+  if (r.me === "sent") me = '<span class="pill sent">sent to me</span>';
+  else if (r.me === "skipped") me = '<span class="pill skip">skipped (time passed)</span>';
+  else me = '<span class="pill">pending</span>';
+  if (t.group) {
+    if (r.group === "ready") grp = `<span class="pill sent">group: forward it</span>
+      <a class="btn small" target="_blank" rel="noopener" href="${shareUrl(r.text)}">Share to group</a>`;
+    else if (r.group === "skipped") grp = '<span class="pill skip">group: skipped</span>';
+    else grp = '<span class="pill">group: pending</span>';
+  }
+  return `<div class="rem"><span>${esc(humanize(r.minutes))} before</span>${me}${grp}</div>`;
+}
+function taskHtml(t) {
+  return `<div class="task ${t.done ? "done" : ""}" data-id="${esc(t.id)}">
+    <div class="title">${esc(t.title)}</div>
+    ${t.note ? `<div class="note">${esc(t.note)}</div>` : ""}
+    <div class="meta">Deadline: ${esc(fmt(t.deadline))}${t.group ? " · Group: " + esc(t.group.name) : ""}${t.done ? " · done" : ""}</div>
+    ${t.reminders.map((r) => remRow(t, r)).join("")}
+    <div class="row">
+      <button class="small" data-act="done">${t.done ? "Undo done" : "Mark done"}</button>
+      <button class="small danger" data-act="del">Delete</button>
+    </div></div>`;
+}
+async function loadTasks() {
+  try {
+    const { tasks } = await api("/api/tasks");
+    $("list").innerHTML = tasks.map(taskHtml).join("");
+    $("empty").classList.toggle("hidden", tasks.length > 0);
+    window.__tasks = tasks;
+  } catch (e) { /* auth handled in api() */ }
+}
+async function loadAll() {
+  try { groups = (await api("/api/groups")).groups || []; renderGroups(); } catch (e) {}
+  await loadTasks();
+}
+$("list").addEventListener("click", async (e) => {
+  const b = e.target.closest("button[data-act]"); if (!b) return;
+  const id = b.closest(".task").dataset.id;
+  const t = (window.__tasks || []).find((x) => x.id === id);
+  try {
+    if (b.dataset.act === "del") {
+      if (!confirm("Delete this task? No more reminders will be sent.")) return;
+      await api("/api/tasks/" + encodeURIComponent(id), { method: "DELETE" });
+    } else {
+      await api("/api/tasks/" + encodeURIComponent(id), { method: "PATCH", body: JSON.stringify({ done: !(t && t.done) }) });
+    }
+    loadTasks();
+  } catch (err) {}
+});
+
+if (pass) showApp(); else showGate("");
+</script>
+</body>
+</html>
