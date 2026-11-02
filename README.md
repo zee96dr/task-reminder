@@ -1,97 +1,103 @@
-# Deadline Reminders (Netlify + CallMeBot WhatsApp)
+# Deadline Reminders (Netlify + GREEN-API WhatsApp)
 
 Add tasks with a deadline. A Netlify Scheduled Function runs every minute and sends WhatsApp reminders
-(15 min, 20 min, 1 day, 2 days, or custom minutes before) even when your browser and phone are closed.
+(15 min, 20 min, 1 day, 2 days, or custom minutes before) to you and optionally to a WhatsApp group,
+even when your browser and phone are closed.
 
-## Group mode: **FALLBACK (active)**
+## Sending service: GREEN-API (Developer plan, free)
 
-I checked the official CallMeBot WhatsApp page (callmebot.com/blog/free-api-whatsapp-messages/).
-The free WhatsApp API is personal-use only and sends only to the phone that owns the apikey.
-The same page lists "Send messages to Groups" as something it does **not** do (it points to paid
-services). So there is no group ID to find, and a `chat.whatsapp.com` invite link cannot send messages.
+CallMeBot's free API cannot send to groups (official page), so this version uses GREEN-API.
+- Your own WhatsApp account is linked by QR code (like WhatsApp Web). Messages go out from your account.
+- Free Developer plan: 3 chats total (contacts or groups), group support. Me + 1 group = 2 chats.
+  A second group still fits; a 3rd chat does not. [unverified: whether your own number counts as a chat]
+- Ban risk: unofficial-style gateway. A spare WhatsApp number is safer than your main one.
 
-What the app does instead (no unofficial or paid service is used):
+## Group mode: REAL GROUP SENDING (active)
 
-1. For each due reminder on a task that has a group, you get the full message on WhatsApp.
-2. In the task list that reminder shows **group: forward it** and a **Share to group** button.
-3. The button opens a `wa.me` share link with the message pre-filled. Pick the group, tap send.
+GREEN-API sends to a group by its **group ID** (`1203630...@g.us`), not the invite link.
+The app still accepts a pasted invite link (validated, invite code extracted, saved), but sending uses the group ID.
+One-time steps to get it:
+1. Your linked WhatsApp account must already be a member of the group.
+2. In the app: pick "New group link…" in the group dropdown, click **Find my groups**,
+   choose the group. Name and Group ID fill in. [unverified: depends on GREEN-API `getContacts`
+   listing groups; if the list is empty, enter the ID by hand]
+3. Click **Save group**. It now appears in the dropdown for later tasks.
+Manual way to get the ID: GREEN-API console > your instance > API / Postman `getContacts`,
+find your group, copy `id` ending in `@g.us`.
 
-The pasted group link is validated (invite code extracted) and saved under a name so you can reuse it
-from the dropdown. The status "sent to group" cannot be known by the app; it shows "forward it" instead.
-In this mode one WhatsApp message to you covers both "me" and "group" for the same reminder
-(no duplicate message). The two flags are still stored separately.
+Group and "me" status are stored separately per reminder. A failed send stays pending and retries next minute.
 
 ## Files
 
 ```
 public/index.html                    single page UI (HTML+CSS+JS, no build)
 netlify/functions/tasks.mjs          task API: list, add, mark done, delete
-netlify/functions/groups.mjs         saved groups: list, delete
+netlify/functions/groups.mjs         saved groups: list, save, delete, lookup
 netlify/functions/test-send.mjs      "Send test WhatsApp" / "Send test to group"
 netlify/functions/send-reminders.mjs scheduled function, every minute
-netlify/lib/*.mjs                    shared code (auth, store, message format, CallMeBot)
+netlify/lib/*.mjs                    shared code (auth, store, message format, GREEN-API)
 netlify.toml, package.json, .gitignore
 ```
 
-## 1. Get the CallMeBot apikey
+## 1. GREEN-API setup
 
-1. Save the CallMeBot WhatsApp bot number as a contact. The number is shown on
-   https://www.callmebot.com/blog/free-api-whatsapp-messages/ (the page currently says the bot can be
-   full; if no number is shown, check back later).
-2. From your WhatsApp, send it exactly: `I allow callmebot to send me messages`
-3. Wait for the reply: "API Activated for your phone number. Your APIKEY is 123123".
-   If nothing arrives in 2 minutes, try again after 24 hours.
-4. Note the apikey and your phone number with country code, e.g. `+923001234567`.
+1. Sign up at console.green-api.com, create a Developer instance.
+2. Open the instance. Status shows "Not Authorized" until linked.
+3. Click the QR / authorization button. On the phone: WhatsApp > Settings > Linked devices > Link a device,
+   scan the QR. Wait until Status becomes **Authorized**.
+4. Copy: `apiUrl`, `idInstance`, `apiTokenInstance` (eye icon reveals the token). Never share the token publicly.
 
 ## 2. Environment variables (Netlify)
 
-Site configuration > Environment variables > Add a variable. Add all three:
+Site configuration > Environment variables. Add all five:
 
 | Name | Value |
 |---|---|
-| `WHATSAPP_PHONE` | your number with country code, e.g. `+923001234567` |
-| `CALLMEBOT_APIKEY` | apikey from step 1 |
-| `APP_PASSCODE` | any passcode you choose (you type it in the app) |
+| `GREENAPI_URL` | your apiUrl, e.g. `https://7107.api.greenapi.com` |
+| `GREENAPI_ID` | your idInstance |
+| `GREENAPI_TOKEN` | your apiTokenInstance |
+| `WHATSAPP_PHONE` | number that receives your reminders, with country code, e.g. `+923001234567` |
+| `APP_PASSCODE` | any passcode you choose |
 
-Secrets live only in Netlify env vars. They are never in the frontend. Redeploy after changing them.
+Secrets live only in Netlify env vars, never in frontend code. Redeploy after changing them.
+Note: `WHATSAPP_PHONE` can be your own number (message to yourself) [unverified]. If that does not arrive,
+use a different number.
 
 ## 3. Deploy from GitHub
 
-1. Extract the ZIP, create a GitHub repo, push all files (keep the folder structure).
+1. Extract the ZIP, create a GitHub repo, push all files (keep folder structure).
 2. Netlify > Add new site > Import an existing project > GitHub > pick the repo.
-3. Build command: leave empty. Publish directory: `public` (already set in `netlify.toml`).
-   Functions directory: `netlify/functions` (already set).
-4. Deploy. Add the env variables (step 2) and trigger a redeploy.
-5. Scheduled functions run only on the **published production deploy**, not on deploy previews or
-   branch deploys. Check Netlify > Logs > Functions > `send-reminders` to see it running each minute.
+3. Build command: empty. Publish directory: `public`. Functions: `netlify/functions` (set in `netlify.toml`).
+4. Deploy, add env variables, then trigger a redeploy.
+5. Scheduled functions run only on the **published production deploy**. Check Logs > Functions > `send-reminders`.
 
 ## 4. Test
 
-1. Open the site, enter the passcode.
-2. Click **Send test WhatsApp**. A message should arrive within about a minute.
-3. Click **Send test to group**, then tap **Share to group** and send it to your group.
-4. Add a task with deadline about 20 minutes from now (Asia/Karachi time) and tick **15 min**.
-   Close the browser. The reminder arrives 15 minutes before the deadline and the task row shows "sent to me".
-5. Add a task whose reminder time already passed: the reminder is skipped and a warning appears.
+1. Open the site, enter the passcode. Click **Send test WhatsApp**. Message should arrive.
+2. Group dropdown > "New group link…" > Find my groups > pick group > Save group.
+3. With that group selected in the dropdown, click **Send test to group**. It posts in the group.
+4. Add a task due in about 20 minutes (Asia/Karachi time), tick **15 min** and pick the group. Close the browser.
+   Reminder arrives to you and the group 15 minutes before. Row shows "sent to me" and "sent to group".
+5. Add a task whose reminder time already passed: it is skipped and a warning shows.
 
 ## Behaviour notes
 
 - Deadlines are entered as Asia/Karachi time (UTC+5), stored as UTC, shown as Asia/Karachi.
-- Each reminder is marked sent only after CallMeBot accepts it. On failure it stays pending and is retried
-  on the next run (until the deadline passes).
+- Each reminder marked sent only after GREEN-API returns a message id. On failure it stays pending, retried each minute until the deadline.
 - Done or deleted tasks send nothing further.
-- Each run sends at most 6 messages to stay inside the function time limit; the rest go out next minute.
-- Message layout: first line "⏳ N unit remaining", then title, optional context, deadline.
+- Each run sends at most 8 messages; the rest go out next minute.
+- Message layout: first line "⏳ N unit remaining", then title, optional context, deadline. Same for me and group.
 
 ## Verification status
 
-- CallMeBot has no WhatsApp group sending: verified on the official page (see above).
-- CallMeBot GET endpoint `https://api.callmebot.com/whatsapp.php?phone=&text=&apikey=`: verified on the official page.
-- CallMeBot success/error response text: [unverified]. The code treats HTTP errors or a body containing "error" as failure.
-- Scheduled function via `export const config = { schedule: "..." }`, cron in UTC, production deploys only: verified in Netlify docs.
-- Every-minute cron `* * * * *` accepted by Netlify: [unverified] (standard cron; docs show `@hourly` and `0 0 * * *` examples).
-- Blobs API (`getStore`, `setJSON`, `get`, `getWithMetadata`, `list({prefix})`, `delete`, `consistency: "strong"`): verified in docs / package readme.
+- GREEN-API request shape `{apiUrl}/waInstance{idInstance}/{method}/{apiTokenInstance}` and group IDs ending `@g.us`: verified in GREEN-API docs.
+- `sendMessage` body `{chatId, message}`, success returns `idMessage`: matches docs/SDK examples; exact response [unverified] on your instance.
+- Developer plan: 3 chats, group support: verified on GREEN-API pricing pages. Plan terms may change.
+- `getContacts` returning groups with `id`/`name`: [unverified].
+- Messaging your own number via `...@c.us`: [unverified].
+- Scheduled function via `export const config = { schedule }`, cron in UTC, production deploys only: verified in Netlify docs.
+- Every-minute cron `* * * * *` accepted by Netlify: [unverified].
+- Blobs API (`getStore`, `setJSON`, `get`, `getWithMetadata`, `list({prefix})`, `delete`, `consistency: "strong"`): verified in docs.
 - `setJSON(..., { onlyIfMatch })` returning `{ modified }`: [unverified] exact return shape. Code tolerates a missing value.
-- Free-tier cost of one invocation per minute (~43,200/month): [unverified]. Sources conflict: older plans list 125,000
-  invocations, newer free accounts use 300 credits/month. Check Netlify > Usage after a day.
-- `@netlify/blobs` version range `>=8.1.0` in `package.json`: [unverified]. Pin to the latest version npm shows if you prefer.
+- Free-tier cost of one invocation per minute (~43,200/month): [unverified]. Sources conflict (125,000 invocations vs 300 credits/month). Check Netlify Usage after a day.
+- `@netlify/blobs` version range `>=8.1.0`: [unverified].
