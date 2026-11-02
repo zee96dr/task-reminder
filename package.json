@@ -1,0 +1,11 @@
+{
+  "name": "task-reminder",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Task deadline reminders via WhatsApp (CallMeBot) on Netlify",
+  "engines": { "node": ">=20" },
+  "dependencies": {
+    "@netlify/blobs": ">=8.1.0"
+  }
+}
