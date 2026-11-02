@@ -1,7 +1,7 @@
 import { authorized, unauthorized, json } from "../lib/auth.mjs";
 import { getDb, listTasks, updateTask, getGroups, saveGroups } from "../lib/store.mjs";
 import { buildMessage } from "../lib/format.mjs";
-import { extractInviteCode } from "../lib/whatsapp.mjs";
+import { extractInviteCode, isGroupId } from "../lib/whatsapp.mjs";
 
 export const config = { path: ["/api/tasks", "/api/tasks/:id"] };
 
@@ -36,17 +36,19 @@ export default async (req, context) => {
       if (!mins.length) return json({ error: "Pick at least one reminder" }, 400);
 
       let group = null;
-      if (b.group && b.group.link) {
-        const code = extractInviteCode(b.group.link);
-        if (!code) return json({ error: "That is not a WhatsApp group invite link" }, 400);
-        group = {
-          name: String(b.group.name || "Group").trim().slice(0, 60) || "Group",
-          link: `https://chat.whatsapp.com/${code}`,
-          code,
-        };
+      if (b.group) {
+        const chatId = String(b.group.chatId || "").trim();
+        if (!isGroupId(chatId)) return json({ error: "Group ID is missing or invalid (use Find my groups)" }, 400);
+        let link = null, code = null;
+        if (b.group.link && String(b.group.link).trim()) {
+          code = extractInviteCode(b.group.link);
+          if (!code) return json({ error: "That is not a WhatsApp group invite link" }, 400);
+          link = `https://chat.whatsapp.com/${code}`;
+        }
+        group = { name: String(b.group.name || "Group").trim().slice(0, 60) || "Group", chatId, link, code };
         const groups = await getGroups(db);
-        const i = groups.findIndex((g) => g.code === code);
-        if (i >= 0) groups[i] = { ...groups[i], name: group.name };
+        const i = groups.findIndex((g) => g.chatId === chatId);
+        if (i >= 0) groups[i] = { ...groups[i], name: group.name, link: link || groups[i].link, code: code || groups[i].code };
         else groups.push(group);
         await saveGroups(db, groups);
       }
